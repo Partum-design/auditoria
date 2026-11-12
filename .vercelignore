@@ -2,3 +2,6 @@ _respaldo_original
 README.md
 *.json.bak
 Auditoria
+.fontcache
+node_modules
+dist

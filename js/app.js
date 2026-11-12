@@ -24,7 +24,6 @@ const SMART_DEFAULTS = { 'Cumple': ['Bajo', '3 · Mejora futura'], 'Parcial': ['
 //  INICIO
 // =====================================================================
 document.addEventListener('DOMContentLoaded', async () => {
-    setupBrandLogo();
     await finishMigration();
     bindGlobal();
     store.onChange(onStoreEvent);
@@ -33,17 +32,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     route();
     window.addEventListener('hashchange', route);
 });
-
-function setupBrandLogo() {
-    const img = $('#brandLogo'), txt = $('#brandText');
-    const fallbacks = ['https://partumdesign.com.mx/wp-content/uploads/2025/03/Recursxo-1.png'];
-    const fail = () => {
-        const next = fallbacks.shift();
-        if (next) img.src = next; else { img.hidden = true; txt.hidden = false; }
-    };
-    img.addEventListener('error', fail);
-    if (img.complete && !img.naturalWidth) fail(); // ya falló antes de cargar el script
-}
 
 function onStoreEvent(type) {
     const el = $('#saveState');
@@ -903,6 +891,7 @@ function announceUnlocks(before, after) {
 //  RESUMEN
 // =====================================================================
 function renderSummary() {
+    warmPdf();
     const s = collectStats();
     const totalAudit = Object.values(s.statusCount).reduce((a, b) => a + b, 0);
     const toneColor = { ok: 'var(--ok)', part: 'var(--warn)', bad: 'var(--bad)', unk: 'var(--info)', na: '#8a86ad', crit: 'var(--crit)' };
@@ -981,13 +970,22 @@ function bindExport(root) {
     $$('[data-pdf]', root).forEach(b => b.onclick = () => exportPDF(b.dataset.pdf));
 }
 
+// jsPDF (~400 KB) se descarga solo cuando se necesita
+const loadScript = src => new Promise((ok, fail) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => fail(new Error('No se pudo cargar ' + src)); document.head.append(s); });
+let pdfLibs;
+function loadPdfLibs() {
+    pdfLibs ||= loadScript('vendor/jspdf.umd.min.js').then(() => loadScript('vendor/jspdf.plugin.autotable.min.js')).then(() => import('./pdf.js'));
+    pdfLibs.catch(() => { pdfLibs = null; });
+    return pdfLibs;
+}
+const warmPdf = () => (window.requestIdleCallback || setTimeout)(() => loadPdfLibs().catch(() => { }));
+
 async function exportPDF(mode = 'save') {
-    if (!window.jspdf) { toast('El generador de PDF aún está cargando, intenta de nuevo', 'warn'); return; }
     const busy = document.createElement('div'); busy.className = 'busy';
     busy.innerHTML = `<div class="busy-box"><div class="spin"></div><div>Generando PDF…</div></div>`;
     document.body.append(busy);
     try {
-        const { buildPDF } = await import('./pdf.js');
+        const { buildPDF } = await loadPdfLibs();
         const doc = await buildPDF(getExportOpts());
         const fname = `Diagnostico_${(store.audit.name || 'Cliente').replace(/[^\wÀ-ſ]+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`;
         if (mode === 'preview') { const url = doc.output('bloburl'); const w = window.open(url, '_blank'); if (!w) doc.save(fname); }
@@ -1060,6 +1058,7 @@ function bindGlobal() {
     });
 
     $('#exportBtn').onclick = openExportModal;
+    ['pointerenter', 'focus', 'touchstart'].forEach(ev => $('#exportBtn').addEventListener(ev, warmPdf, { once: true, passive: true }));
     $('#backupBtn').onclick = () => downloadBackup();
     $('#clientSwitch').onclick = openAuditsModal;
     $('#importInput').addEventListener('change', async e => {
